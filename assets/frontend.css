@@ -219,6 +219,13 @@
   border: 1px solid #ffeaa7;
 }
 
+.exam-timer {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #d7263d;
+  margin-bottom: 15px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .pdf-mcq-content {

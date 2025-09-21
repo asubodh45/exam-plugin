@@ -10,6 +10,7 @@
  */
 
 // Prevent direct access
+//need localhost/wordpress-> which is absolute path if this file is accessed from outside 
 if (!defined('ABSPATH')) {
     exit;
 }

@@ -1,6 +1,50 @@
 jQuery(document).ready(function ($) {
   "use strict";
 
+  $("#update_questions").on("click", function (e) {
+    e.preventDefault();
+    var numQuestions = parseInt($("#number_of_questions").val(), 10) || 1;
+    var $container = $("#questions-container .questions-grid");
+    $container.empty();
+
+    for (var i = 1; i <= numQuestions; i++) {
+      var html = '<div class="question-item">';
+      html += "<label>Q" + i + ":</label>";
+      html += '<select name="correct_answers[' + i + ']">';
+      html += '<option value="">Select</option>';
+      html += '<option value="a">A</option>';
+      html += '<option value="b">B</option>';
+      html += '<option value="c">C</option>';
+      html += '<option value="d">D</option>';
+      html += "</select>";
+      html += "</div>";
+      $container.append(html);
+    }
+  });
+
+  $("#update_answers").on("click", function (e) {
+    e.preventDefault();
+    var numQuestions = parseInt($("#number_of_questions").val(), 10) || 1;
+    var numAnswers = parseInt($("#number_of_answers").val(), 10) || 4;
+    var $container = $("#questions-container .questions-grid");
+    $container.empty();
+
+    for (var i = 1; i <= numQuestions; i++) {
+      var html = '<div class="question-item">';
+      html += "<label>Q" + i + ":</label>";
+      html += '<select name="correct_answers[' + i + ']">';
+      html += '<option value="">Select</option>';
+      for (var j = 0; j < numAnswers; j++) {
+        var option = String.fromCharCode(97 + j); // a, b, c, ...
+        var optionLabel = option.toUpperCase();
+        html += '<option value="' + option + '">' + optionLabel + "</option>";
+      }
+      html += "</select>";
+      html += "</div>";
+      $container.append(html);
+    }
+  });
+
   // PDF Upload functionality
   function initPDFUpload() {
     var mediaUploader;
