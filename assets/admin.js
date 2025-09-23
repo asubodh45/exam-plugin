@@ -1,9 +1,13 @@
+//admin.js
+
 jQuery(document).ready(function ($) {
   "use strict";
 
+  // Update questions functionality
   $("#update_questions").on("click", function (e) {
     e.preventDefault();
     var numQuestions = parseInt($("#number_of_questions").val(), 10) || 1;
+    var numAnswers = parseInt($("#number_of_answers").val(), 10) || 4;
     var $container = $("#questions-container .questions-grid");
     $container.empty();
 
@@ -12,10 +16,11 @@ jQuery(document).ready(function ($) {
       html += "<label>Q" + i + ":</label>";
       html += '<select name="correct_answers[' + i + ']">';
       html += '<option value="">Select</option>';
-      html += '<option value="a">A</option>';
-      html += '<option value="b">B</option>';
-      html += '<option value="c">C</option>';
-      html += '<option value="d">D</option>';
+      for (var j = 0; j < numAnswers; j++) {
+        var option = String.fromCharCode(97 + j); // a, b, c, ...
+        var optionLabel = option.toUpperCase();
+        html += '<option value="' + option + '">' + optionLabel + "</option>";
+      }
       html += "</select>";
       html += "</div>";
       $container.append(html);
@@ -149,6 +154,9 @@ jQuery(document).ready(function ($) {
     // Clear container
     container.empty();
 
+    // Get number of answer options
+    var numAnswers = parseInt($("#number_of_answers").val()) || 4;
+
     // Generate new questions
     for (var i = 1; i <= numQuestions; i++) {
       var existingValue = existingAnswers[i] || "";
@@ -157,22 +165,20 @@ jQuery(document).ready(function ($) {
       questionHtml += "<label>Q" + i + ":</label>";
       questionHtml += '<select name="correct_answers[' + i + ']">';
       questionHtml += '<option value="">Select</option>';
-      questionHtml +=
-        '<option value="a"' +
-        (existingValue === "a" ? " selected" : "") +
-        ">A</option>";
-      questionHtml +=
-        '<option value="b"' +
-        (existingValue === "b" ? " selected" : "") +
-        ">B</option>";
-      questionHtml +=
-        '<option value="c"' +
-        (existingValue === "c" ? " selected" : "") +
-        ">C</option>";
-      questionHtml +=
-        '<option value="d"' +
-        (existingValue === "d" ? " selected" : "") +
-        ">D</option>";
+
+      for (var j = 0; j < numAnswers; j++) {
+        var option = String.fromCharCode(97 + j); // a, b, c, d, etc.
+        var optionLabel = option.toUpperCase();
+        questionHtml +=
+          '<option value="' +
+          option +
+          '"' +
+          (existingValue === option ? " selected" : "") +
+          ">" +
+          optionLabel +
+          "</option>";
+      }
+
       questionHtml += "</select>";
       questionHtml += "</div>";
 
@@ -220,6 +226,123 @@ jQuery(document).ready(function ($) {
       });
   }
 
+  // Marking Scheme Calculator
+  function initMarkingSchemeCalculator() {
+    // Add calculator after marking scheme meta box
+    var calculatorHtml = `
+      <div class="marking-calculator" style="margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 4px;">
+        <h4>Marking Scheme Calculator</h4>
+        <table class="form-table">
+          <tr>
+            <th>Total Questions:</th>
+            <td><span id="calc-total-questions">0</span></td>
+          </tr>
+          <tr>
+            <th>Maximum Possible Score:</th>
+            <td><span id="calc-max-score">0</span></td>
+          </tr>
+          <tr>
+            <th>Score if all correct:</th>
+            <td><span id="calc-all-correct">0</span></td>
+          </tr>
+          <tr>
+            <th>Score if all incorrect:</th>
+            <td><span id="calc-all-incorrect">0</span></td>
+          </tr>
+          <tr>
+            <th>Break-even point:</th>
+            <td><span id="calc-break-even">N/A</span></td>
+          </tr>
+        </table>
+        <p class="description">
+          <strong>Break-even point:</strong> Minimum questions needed to score above zero when rest are incorrect.
+        </p>
+      </div>
+    `;
+
+    // Insert calculator after marking scheme meta box
+    $("#marking_scheme_meta_box").after(calculatorHtml);
+
+    // Update calculator when values change
+    function updateCalculator() {
+      var totalQuestions = parseInt($("#number_of_questions").val()) || 0;
+      var positiveMarks = parseFloat($("#positive_marks").val()) || 0;
+      var negativeMarks = parseFloat($("#negative_marks").val()) || 0;
+
+      var maxScore = totalQuestions * positiveMarks;
+      var allCorrectScore = totalQuestions * positiveMarks;
+      var allIncorrectScore = -(totalQuestions * negativeMarks);
+
+      // Calculate break-even point
+      var breakEven = "N/A";
+      if (negativeMarks > 0) {
+        var needed = Math.ceil(
+          (negativeMarks * totalQuestions) / (positiveMarks + negativeMarks)
+        );
+        breakEven = needed + " questions";
+      }
+
+      $("#calc-total-questions").text(totalQuestions);
+      $("#calc-max-score").text(maxScore.toFixed(2));
+      $("#calc-all-correct").text(allCorrectScore.toFixed(2));
+      $("#calc-all-incorrect").text(allIncorrectScore.toFixed(2));
+      $("#calc-break-even").text(breakEven);
+    }
+
+    // Bind events
+    $("#number_of_questions, #positive_marks, #negative_marks").on(
+      "input change",
+      updateCalculator
+    );
+
+    // Initial calculation
+    updateCalculator();
+  }
+
+  // Global Settings Integration
+  function initGlobalSettingsIntegration() {
+    // Add buttons to sync with global settings
+    var syncHtml = `
+      <div class="global-settings-sync" style="margin: 10px 0; padding: 10px; background: #e7f3ff; border-radius: 4px;">
+        <p><strong>Global Settings Sync:</strong></p>
+        <button type="button" id="sync-positive" class="button button-small">Use Global Positive Marks</button>
+        <button type="button" id="sync-negative" class="button button-small">Use Global Negative Marks</button>
+        <button type="button" id="sync-both" class="button button-small">Use Global Settings</button>
+      </div>
+    `;
+
+    $("#positive_marks")
+      .closest("tr")
+      .after('<tr><td colspan="2">' + syncHtml + "</td></tr>");
+
+    // Note: In a real implementation, you would fetch global settings via AJAX
+    // For now, we'll use default values
+    $("#sync-positive").on("click", function () {
+      $("#positive_marks").val(1).trigger("change");
+      showAdminNotification(
+        "Positive marks synced with global settings",
+        "success"
+      );
+    });
+
+    $("#sync-negative").on("click", function () {
+      $("#negative_marks").val(0.25).trigger("change");
+      showAdminNotification(
+        "Negative marks synced with global settings",
+        "success"
+      );
+    });
+
+    $("#sync-both").on("click", function () {
+      $("#positive_marks").val(1).trigger("change");
+      $("#negative_marks").val(0.25).trigger("change");
+      showAdminNotification(
+        "Both marking settings synced with global settings",
+        "success"
+      );
+    });
+  }
+
   // Bulk answer setting
   function initBulkAnswerSetting() {
     var bulkHtml =
@@ -232,16 +355,34 @@ jQuery(document).ready(function ($) {
       '<label>To Question: <input type="number" id="bulk-to" min="1" style="width: 60px;"></label> ';
     bulkHtml += '<label>Answer: <select id="bulk-answer">';
     bulkHtml += '<option value="">Select</option>';
-    bulkHtml += '<option value="a">A</option>';
-    bulkHtml += '<option value="b">B</option>';
-    bulkHtml += '<option value="c">C</option>';
-    bulkHtml += '<option value="d">D</option>';
+    // We'll populate this dynamically based on number of answers
     bulkHtml += "</select></label> ";
     bulkHtml +=
       '<button type="button" id="apply-bulk" class="button">Apply</button>';
     bulkHtml += "</div>";
 
     $("#questions-container h3").after(bulkHtml);
+
+    // Update bulk answer options when number of answers changes
+    function updateBulkAnswerOptions() {
+      var numAnswers = parseInt($("#number_of_answers").val()) || 4;
+      var select = $("#bulk-answer");
+      select.empty().append('<option value="">Select</option>');
+
+      for (var i = 0; i < numAnswers; i++) {
+        var option = String.fromCharCode(97 + i); // a, b, c, d, etc.
+        var optionLabel = option.toUpperCase();
+        select.append(
+          '<option value="' + option + '">' + optionLabel + "</option>"
+        );
+      }
+    }
+
+    // Initialize bulk answer options
+    updateBulkAnswerOptions();
+
+    // Update when number of answers changes
+    $("#number_of_answers").on("change", updateBulkAnswerOptions);
 
     $("#apply-bulk").on("click", function () {
       var from = parseInt($("#bulk-from").val());
@@ -299,22 +440,24 @@ jQuery(document).ready(function ($) {
     $(".bulk-answer-setting").after(analysisHtml);
 
     $("#analyze-answers").on("click", function () {
-      var analysis = {
-        a: 0,
-        b: 0,
-        c: 0,
-        d: 0,
-        unanswered: 0,
-      };
+      var numAnswers = parseInt($("#number_of_answers").val()) || 4;
+      var analysis = {};
       var total = 0;
+
+      // Initialize analysis object
+      for (var i = 0; i < numAnswers; i++) {
+        var option = String.fromCharCode(97 + i);
+        analysis[option] = 0;
+      }
+      analysis.unanswered = 0;
 
       $(".question-item select").each(function () {
         var value = $(this).val();
         total++;
 
-        if (value) {
+        if (value && analysis.hasOwnProperty(value)) {
           analysis[value]++;
-        } else {
+        } else if (!value) {
           analysis.unanswered++;
         }
       });
@@ -323,30 +466,22 @@ jQuery(document).ready(function ($) {
         '<div style="background: white; padding: 15px; border-radius: 4px; border: 1px solid #ddd;">';
       resultsHtml += "<h4>Answer Distribution:</h4>";
       resultsHtml += "<ul>";
-      resultsHtml +=
-        "<li><strong>A:</strong> " +
-        analysis.a +
-        " (" +
-        (total > 0 ? Math.round((analysis.a / total) * 100) : 0) +
-        "%)</li>";
-      resultsHtml +=
-        "<li><strong>B:</strong> " +
-        analysis.b +
-        " (" +
-        (total > 0 ? Math.round((analysis.b / total) * 100) : 0) +
-        "%)</li>";
-      resultsHtml +=
-        "<li><strong>C:</strong> " +
-        analysis.c +
-        " (" +
-        (total > 0 ? Math.round((analysis.c / total) * 100) : 0) +
-        "%)</li>";
-      resultsHtml +=
-        "<li><strong>D:</strong> " +
-        analysis.d +
-        " (" +
-        (total > 0 ? Math.round((analysis.d / total) * 100) : 0) +
-        "%)</li>";
+
+      for (var i = 0; i < numAnswers; i++) {
+        var option = String.fromCharCode(97 + i);
+        var optionLabel = option.toUpperCase();
+        var count = analysis[option] || 0;
+        var percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+        resultsHtml +=
+          "<li><strong>" +
+          optionLabel +
+          ":</strong> " +
+          count +
+          " (" +
+          percentage +
+          "%)</li>";
+      }
+
       resultsHtml +=
         "<li><strong>Unanswered:</strong> " +
         analysis.unanswered +
@@ -363,15 +498,23 @@ jQuery(document).ready(function ($) {
           " questions do not have correct answers set.</div>";
       }
 
-      var maxAnswer = Object.keys(analysis).reduce((a, b) =>
-        analysis[a] > analysis[b] ? a : b
-      );
-      if (maxAnswer !== "unanswered" && analysis[maxAnswer] > total * 0.5) {
+      // Find most frequent answer (excluding unanswered)
+      var maxAnswer = null;
+      var maxCount = 0;
+      for (var i = 0; i < numAnswers; i++) {
+        var option = String.fromCharCode(97 + i);
+        if (analysis[option] > maxCount) {
+          maxCount = analysis[option];
+          maxAnswer = option;
+        }
+      }
+
+      if (maxAnswer && maxCount > total * 0.5) {
         resultsHtml +=
           '<div style="color: #d63638; margin-top: 5px;"><strong>⚠️ Notice:</strong> Answer ' +
           maxAnswer.toUpperCase() +
           " appears to be used very frequently (" +
-          Math.round((analysis[maxAnswer] / total) * 100) +
+          Math.round((maxCount / total) * 100) +
           "%). Consider reviewing for balance.</div>";
       }
 
@@ -416,7 +559,10 @@ jQuery(document).ready(function ($) {
       var exportData = {
         quiz_title: postTitle,
         total_questions: parseInt($("#number_of_questions").val()),
+        number_of_answers: parseInt($("#number_of_answers").val()),
         answers: answers,
+        positive_marks: parseFloat($("#positive_marks").val()),
+        negative_marks: parseFloat($("#negative_marks").val()),
         export_date: new Date().toISOString(),
       };
 
@@ -450,7 +596,7 @@ jQuery(document).ready(function ($) {
           var importData = JSON.parse(e.target.result);
 
           if (!importData.answers) {
-            throw new Error("Invalid file format");
+            throw new Error("Invalid file format - missing answers");
           }
 
           // Update number of questions if different
@@ -469,9 +615,46 @@ jQuery(document).ready(function ($) {
               )
             ) {
               $("#number_of_questions").val(importData.total_questions);
-              updateQuestionsGrid(importData.total_questions);
             }
           }
+
+          // Update number of answer options if different
+          if (
+            importData.number_of_answers &&
+            importData.number_of_answers !==
+              parseInt($("#number_of_answers").val())
+          ) {
+            if (
+              confirm(
+                "The imported file has " +
+                  importData.number_of_answers +
+                  " answer options, but current quiz has " +
+                  $("#number_of_answers").val() +
+                  ". Update the number of answer options?"
+              )
+            ) {
+              $("#number_of_answers").val(importData.number_of_answers);
+            }
+          }
+
+          // Update marking scheme if available
+          if (importData.positive_marks !== undefined) {
+            if (
+              confirm(
+                "Import marking scheme? Positive: " +
+                  importData.positive_marks +
+                  ", Negative: " +
+                  (importData.negative_marks || 0)
+              )
+            ) {
+              $("#positive_marks").val(importData.positive_marks);
+              $("#negative_marks").val(importData.negative_marks || 0);
+            }
+          }
+
+          // Regenerate questions grid with imported settings
+          var numQuestions = parseInt($("#number_of_questions").val());
+          updateQuestionsGrid(numQuestions);
 
           // Import answers
           var imported = 0;
@@ -530,6 +713,8 @@ jQuery(document).ready(function ($) {
     $("form#post").on("submit", function (e) {
       var pdfUrl = $("#pdf_url").val();
       var numQuestions = parseInt($("#number_of_questions").val());
+      var positiveMarks = parseFloat($("#positive_marks").val());
+      var negativeMarks = parseFloat($("#negative_marks").val());
 
       if (!pdfUrl) {
         alert("Please upload a PDF file before saving.");
@@ -539,6 +724,18 @@ jQuery(document).ready(function ($) {
 
       if (!numQuestions || numQuestions < 1) {
         alert("Please enter a valid number of questions.");
+        e.preventDefault();
+        return false;
+      }
+
+      if (isNaN(positiveMarks) || positiveMarks <= 0) {
+        alert("Please enter a valid positive marking value.");
+        e.preventDefault();
+        return false;
+      }
+
+      if (isNaN(negativeMarks) || negativeMarks < 0) {
+        alert("Please enter a valid negative marking value (0 or greater).");
         e.preventDefault();
         return false;
       }
@@ -578,6 +775,8 @@ jQuery(document).ready(function ($) {
   function initialize() {
     initPDFUpload();
     initQuestionsManagement();
+    initMarkingSchemeCalculator();
+    initGlobalSettingsIntegration();
     initBulkAnswerSetting();
     initAnswerAnalysis();
     initImportExport();

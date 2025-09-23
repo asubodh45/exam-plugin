@@ -1,8 +1,189 @@
+//frontend.js
+
 jQuery(document).ready(function ($) {
   "use strict";
 
-  // Initialize the quiz
+  // PDF.js variables (only if PDF.js is being used)
+  let pdfDoc = null;
+  let pageNum = 1;
+  let pageRendering = false;
+  let pageNumPending = null;
+  let scale = 0.8;
+
+  // Quiz timing variables
+  let quizStartTime = null;
+  let timerInterval = null;
+  let examTimeInMinutes = 0;
+
+  // Initialize PDF viewer if canvas exists
+  function initPDFViewer() {
+    const canvas = document.getElementById("pdf-canvas");
+    if (!canvas) return; // Skip if using iframe approach
+
+    const ctx = canvas.getContext("2d");
+    const loadingDiv = document.getElementById("pdf-loading");
+    const pdfUrl =
+      canvas.getAttribute("data-pdf-url") ||
+      $(".pdf-mcq-container").attr("data-pdf-url");
+
+    if (!pdfUrl) {
+      console.error("PDF URL not found");
+      return;
+    }
+
+    // PDF.js configuration
+    if (typeof pdfjsLib !== "undefined") {
+      pdfjsLib.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+      // Load PDF
+      pdfjsLib
+        .getDocument(pdfUrl)
+        .promise.then(function (pdfDoc_) {
+          pdfDoc = pdfDoc_;
+          document.getElementById("page-count").textContent = pdfDoc.numPages;
+
+          if (loadingDiv) loadingDiv.style.display = "none";
+          canvas.style.display = "block";
+
+          // Render the first page
+          renderPage(pageNum);
+
+          // Auto fit width after loading
+          setTimeout(fitWidth, 500);
+        })
+        .catch(function (error) {
+          console.error("Error loading PDF:", error);
+          if (loadingDiv) {
+            loadingDiv.innerHTML =
+              'Error loading PDF. <a href="' +
+              pdfUrl +
+              '" target="_blank">Open PDF directly</a>';
+          }
+        });
+    }
+  }
+
+  // Render specific page
+  function renderPage(num) {
+    if (!pdfDoc) return;
+
+    pageRendering = true;
+
+    pdfDoc.getPage(num).then(function (page) {
+      const canvas = document.getElementById("pdf-canvas");
+      const ctx = canvas.getContext("2d");
+      const viewport = page.getViewport({ scale: scale });
+
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport,
+      };
+
+      const renderTask = page.render(renderContext);
+
+      renderTask.promise.then(function () {
+        pageRendering = false;
+        if (pageNumPending !== null) {
+          renderPage(pageNumPending);
+          pageNumPending = null;
+        }
+      });
+    });
+
+    const pageNumElement = document.getElementById("page-num");
+    if (pageNumElement) {
+      pageNumElement.textContent = num;
+    }
+  }
+
+  // Queue rendering
+  function queueRenderPage(num) {
+    if (pageRendering) {
+      pageNumPending = num;
+    } else {
+      renderPage(num);
+    }
+  }
+
+  // PDF Navigation functions
+  function onPrevPage() {
+    if (pageNum <= 1) return;
+    pageNum--;
+    queueRenderPage(pageNum);
+  }
+
+  function onNextPage() {
+    if (pageNum >= pdfDoc.numPages) return;
+    pageNum++;
+    queueRenderPage(pageNum);
+  }
+
+  function zoomIn() {
+    scale *= 1.2;
+    queueRenderPage(pageNum);
+  }
+
+  function zoomOut() {
+    scale /= 1.2;
+    queueRenderPage(pageNum);
+  }
+
+  function fitWidth() {
+    if (pdfDoc) {
+      pdfDoc.getPage(pageNum).then(function (page) {
+        const canvas = document.getElementById("pdf-canvas");
+        const containerWidth = canvas.parentElement.clientWidth - 40;
+        const viewport = page.getViewport({ scale: 1 });
+        scale = (containerWidth / viewport.width) * 0.8; // Multiply by 0.8 for 20% less
+        queueRenderPage(pageNum);
+      });
+    }
+  }
+
+  // Initialize PDF controls
+  function initPDFControls() {
+    $("#prev-page").on("click", onPrevPage);
+    $("#next-page").on("click", onNextPage);
+    $("#zoom-in").on("click", zoomIn);
+    $("#zoom-out").on("click", zoomOut);
+    $("#fit-width").on("click", fitWidth);
+  }
+
+  // Enhanced Quiz initialization
   function initQuiz() {
+    // Handle start quiz button (NEW)
+    $("#start-quiz").on("click", function () {
+      const studentName = $("#student-name").val().trim();
+
+      if (!studentName) {
+        alert("Please enter your name to start the quiz.");
+        return;
+      }
+
+      // Hide user info section and show quiz content
+      $("#user-info-section").hide();
+      $(".pdf-mcq-content").show();
+
+      // Start enhanced timer
+      startEnhancedExamTimer();
+
+      // Load PDF
+      initPDFViewer();
+
+      // Record start time
+      quizStartTime = new Date();
+
+      // Load any auto-saved answers
+      loadAutoSave();
+
+      // Initialize progress tracking
+      updateProgress();
+    });
+
     // Add event listeners for radio buttons
     $('.mcq-question input[type="radio"]').on("change", function () {
       var questionDiv = $(this).closest(".mcq-question");
@@ -10,14 +191,22 @@ jQuery(document).ready(function ($) {
 
       // Update the visual state
       updateQuestionState(questionDiv);
+
+      // Update progress and navigation
+      setTimeout(function () {
+        updateProgress();
+        updateNavigationStates();
+      }, 100);
     });
 
-    // Submit quiz button
+    // Submit quiz button (ENHANCED)
     $("#submit-quiz").on("click", function () {
-      submitQuiz();
+      if (confirm("Are you sure you want to submit your quiz?")) {
+        submitEnhancedQuiz();
+      }
     });
 
-    // Reset quiz button
+    // Reset quiz button (keeping existing functionality)
     $("#reset-quiz").on("click", function () {
       resetQuiz();
     });
@@ -26,78 +215,128 @@ jQuery(document).ready(function ($) {
     setInterval(autoSave, 30000); // Auto-save every 30 seconds
   }
 
-  // Update question visual state
-  function updateQuestionState(questionDiv) {
-    var hasAnswer = questionDiv.find('input[type="radio"]:checked').length > 0;
+  // Enhanced exam timer with warnings
+  function startEnhancedExamTimer() {
+    const timerElement = $(".exam-timer");
+    examTimeInMinutes = parseInt(timerElement.data("time"), 10) || 30;
+    let timeLeft = examTimeInMinutes * 60; // Convert to seconds
 
-    if (hasAnswer) {
-      questionDiv.addClass("answered");
-    } else {
-      questionDiv.removeClass("answered");
+    // Clear any existing timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
     }
-  }
 
-  // Collect user answers
-  function collectAnswers() {
-    var answers = {};
-    var quizContainer = $(".pdf-mcq-container");
-    var quizId = quizContainer.data("quiz-id");
+    timerInterval = setInterval(function () {
+      const hours = Math.floor(timeLeft / 3600);
+      const minutes = Math.floor((timeLeft % 3600) / 60);
+      const seconds = timeLeft % 60;
 
-    $(".mcq-question").each(function () {
-      var questionNum = $(this).data("question");
-      var selectedAnswer = $(this).find('input[type="radio"]:checked').val();
-
-      if (selectedAnswer) {
-        answers[questionNum] = selectedAnswer;
+      let displayTime = "";
+      if (hours > 0) {
+        displayTime = `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
+          .toString()
+          .padStart(2, "0")}`;
+      } else {
+        displayTime = `${minutes}:${seconds.toString().padStart(2, "0")}`;
       }
-    });
 
-    return {
-      quiz_id: quizId,
-      answers: answers,
-    };
+      $("#timer-display").text(displayTime);
+
+      // Warning when 5 minutes left
+      if (timeLeft === 300) {
+        timerElement.css({
+          background: "linear-gradient(135deg, #ffebee, #ffcdd2)",
+          "border-color": "#f44336",
+          color: "#c62828",
+        });
+        showNotification("⚠️ Warning: Only 5 minutes remaining!", "warning");
+      }
+
+      // Warning when 1 minute left
+      if (timeLeft === 60) {
+        timerElement.css({
+          background: "linear-gradient(135deg, #ffcdd2, #ef9a9a)",
+          "border-color": "#d32f2f",
+          color: "#b71c1c",
+        });
+        showNotification("⚠️ Final Warning: Only 1 minute remaining!", "error");
+      }
+
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        showNotification(
+          "⏰ Time's up! Your quiz will be submitted automatically.",
+          "error"
+        );
+        setTimeout(() => submitEnhancedQuiz(), 2000);
+        return;
+      }
+
+      timeLeft--;
+    }, 1000);
   }
 
-  // Submit quiz
-  function submitQuiz() {
+  // Enhanced quiz submission with user data
+  function submitEnhancedQuiz() {
+    // Clear timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+    }
+
     var submitButton = $("#submit-quiz");
     var originalText = submitButton.text();
 
     // Disable button and show loading state
     submitButton.prop("disabled", true).text("Submitting...");
 
-    var data = collectAnswers();
+    // Calculate time taken
+    const endTime = new Date();
+    const timeTakenSeconds = quizStartTime
+      ? Math.floor((endTime - quizStartTime) / 1000)
+      : 0;
 
-    if (Object.keys(data.answers).length === 0) {
+    // Collect answers
+    const answers = {};
+    $(".mcq-question").each(function () {
+      const questionNum = $(this).data("question");
+      const selectedAnswer = $(this).find('input[type="radio"]:checked').val();
+      if (selectedAnswer) {
+        answers[questionNum] = selectedAnswer;
+      }
+    });
+
+    // Get user info
+    const userName = $("#student-name").val().trim() || "Guest";
+    const userEmail = $("#student-email").val().trim() || "";
+
+    // Get quiz data
+    const container = $(".pdf-mcq-container");
+    const quizId = container.data("quiz-id");
+
+    if (Object.keys(answers).length === 0) {
       alert("Please answer at least one question before submitting.");
       submitButton.prop("disabled", false).text(originalText);
       return;
     }
 
-    // Confirm submission
-    if (
-      !confirm(
-        "Are you sure you want to submit your quiz? This action cannot be undone."
-      )
-    ) {
-      submitButton.prop("disabled", false).text(originalText);
-      return;
-    }
-
-    // AJAX request to submit answers
+    // AJAX request to submit answers (ENHANCED)
     $.ajax({
       url: pdf_mcq_ajax.ajax_url,
       type: "POST",
       data: {
         action: "save_quiz_answers",
         nonce: pdf_mcq_ajax.nonce,
-        quiz_id: data.quiz_id,
-        answers: data.answers,
+        quiz_id: quizId,
+        answers: answers,
+        user_name: userName,
+        user_email: userEmail,
+        time_taken: timeTakenSeconds,
       },
       success: function (response) {
         if (response.success) {
-          displayResults(response.data);
+          displayEnhancedResults(response.data);
           disableQuiz();
+          clearAutoSave(); // Clear auto-saved data after successful submission
         } else {
           alert("Error submitting quiz: " + (response.data || "Unknown error"));
         }
@@ -112,68 +351,150 @@ jQuery(document).ready(function ($) {
     });
   }
 
-  // Display quiz results
-  function displayResults(data) {
-    var resultsContainer = $("#quiz-results");
-    var resultsContent = $("#results-content");
+  // Enhanced results display with detailed marking
+  function displayEnhancedResults(data) {
+    $(".pdf-mcq-content").hide();
+    $("#quiz-results").show();
 
-    // Create results HTML
-    var html = "";
+    const timeTakenMinutes = Math.floor(data.time_taken / 60);
+    const timeTakenSeconds = data.time_taken % 60;
+    const timeDisplay = `${timeTakenMinutes}:${timeTakenSeconds
+      .toString()
+      .padStart(2, "0")}`;
 
-    // Summary section
-    html += '<div class="results-summary">';
-    html += "<h4>Quiz Summary</h4>";
-    html +=
-      "<p>Correct Answers: <strong>" +
-      data.correct_count +
-      "</strong> out of <strong>" +
-      data.total_questions +
-      "</strong></p>";
-    html += '<p class="score-display">Score: ' + data.percentage + "%</p>";
-    html += "</div>";
+    let resultHtml = `
+      <div class="result-summary" style="background: #fff; padding: 20px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 20px;">
+        <h3>Quiz Summary</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 15px 0;">
+          <div style="text-align: center; padding: 15px; background: #e8f5e8; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #2e7d32;">${data.correct_count}</div>
+            <div style="color: #4caf50;">Correct</div>
+          </div>
+          <div style="text-align: center; padding: 15px; background: #fce8e8; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #c62828;">${data.incorrect_count}</div>
+            <div style="color: #f44336;">Incorrect</div>
+          </div>
+          <div style="text-align: center; padding: 15px; background: #fff3cd; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #f57f17;">${data.unanswered_count}</div>
+            <div style="color: #ff9800;">Unanswered</div>
+          </div>
+          <div style="text-align: center; padding: 15px; background: #e3f2fd; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #1565c0;">${data.percentage}%</div>
+            <div style="color: #2196f3;">Score</div>
+          </div>
+        </div>
+        <table style="width: 100%; margin-top: 15px;">
+          <tr><th style="text-align: left; padding: 5px;">Total Questions:</th><td style="padding: 5px;">${data.total_questions}</td></tr>
+          <tr><th style="text-align: left; padding: 5px;">Positive Marks:</th><td style="padding: 5px; color: green;">+${data.positive_marks}</td></tr>
+          <tr><th style="text-align: left; padding: 5px;">Negative Marks:</th><td style="padding: 5px; color: red;">-${data.negative_marks}</td></tr>
+          <tr><th style="text-align: left; padding: 5px;">Total Marks:</th><td style="padding: 5px; font-weight: bold;">${data.total_marks}/${data.max_possible_marks}</td></tr>
+          <tr><th style="text-align: left; padding: 5px;">Time Taken:</th><td style="padding: 5px;">${timeDisplay}</td></tr>
+        </table>
+      </div>
+    `;
 
-    // Individual results
-    html += "<h4>Question Results:</h4>";
-    html += '<div class="results-grid">';
+    // Question-wise results
+    resultHtml += `
+      <div class="question-wise-results" style="background: #fff; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+        <h3>Question-wise Results</h3>
+        <div style="max-height: 400px; overflow-y: auto;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f5f5f5;">
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Q#</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Your Answer</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Correct Answer</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+    `;
 
-    $.each(data.results, function (questionNum, result) {
-      var statusClass = result.is_correct ? "correct" : "incorrect";
-      var statusText = result.is_correct ? "✓" : "✗";
+    // Add each question result
+    Object.keys(data.results).forEach(function (questionNum) {
+      const result = data.results[questionNum];
+      const userAnswer = result.user_answer
+        ? result.user_answer.toUpperCase()
+        : "Not Answered";
+      const correctAnswer = result.correct_answer
+        ? result.correct_answer.toUpperCase()
+        : "Not Set";
 
-      html += '<div class="result-item ' + statusClass + '">';
-      html += "<div>Q" + questionNum + "</div>";
-      html += "<div>" + statusText + "</div>";
-      html +=
-        "<div>Your: " +
-        (result.user_answer ? result.user_answer.toUpperCase() : "N/A") +
-        "</div>";
-      if (!result.is_correct && result.correct_answer) {
-        html +=
-          "<div>Correct: " + result.correct_answer.toUpperCase() + "</div>";
+      let resultText, resultColor, bgColor;
+      if (result.is_unanswered) {
+        resultText = "Unanswered";
+        resultColor = "#ff9800";
+        bgColor = "#fff3cd";
+      } else if (result.is_correct) {
+        resultText = "✓ Correct";
+        resultColor = "#4caf50";
+        bgColor = "#e8f5e8";
+      } else {
+        resultText = "✗ Incorrect";
+        resultColor = "#f44336";
+        bgColor = "#fce8e8";
       }
-      html += "</div>";
+
+      resultHtml += `
+        <tr style="background: ${bgColor};">
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${questionNum}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${userAnswer}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${correctAnswer}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: ${resultColor}; font-weight: bold;">${resultText}</td>
+        </tr>
+      `;
     });
 
-    html += "</div>";
+    resultHtml += `
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top: 20px; text-align: center;">
+          <button type="button" onclick="window.print()" class="button">Print Results</button>
+          <button type="button" onclick="location.reload()" class="button button-primary">Take Quiz Again</button>
+        </div>
+      </div>
+    `;
 
-    // Update results content
-    resultsContent.html(html);
-    resultsContainer.show().addClass("fade-in");
+    $("#results-content").html(resultHtml);
 
-    // Update question visual states
-    $.each(data.results, function (questionNum, result) {
-      var questionDiv = $('.mcq-question[data-question="' + questionNum + '"]');
-      var statusClass = result.is_correct ? "correct" : "incorrect";
-      questionDiv.addClass(statusClass);
+    // Update question visual states and navigation
+    Object.keys(data.results).forEach(function (questionNum) {
+      const result = data.results[questionNum];
+      const questionDiv = $(`.mcq-question[data-question="${questionNum}"]`);
+
+      questionDiv
+        .removeClass("answered")
+        .addClass(
+          result.is_unanswered
+            ? "unanswered"
+            : result.is_correct
+            ? "correct"
+            : "incorrect"
+        );
     });
+
+    // Update navigation states
+    updateNavigationStates();
 
     // Scroll to results
     $("html, body").animate(
       {
-        scrollTop: resultsContainer.offset().top,
+        scrollTop: $("#quiz-results").offset().top,
       },
       500
     );
+  }
+
+  // Update question visual state
+  function updateQuestionState(questionDiv) {
+    var hasAnswer = questionDiv.find('input[type="radio"]:checked').length > 0;
+
+    if (hasAnswer) {
+      questionDiv.addClass("answered");
+    } else {
+      questionDiv.removeClass("answered");
+    }
   }
 
   // Disable quiz after submission
@@ -184,7 +505,7 @@ jQuery(document).ready(function ($) {
     $(".mcq-section").addClass("loading");
   }
 
-  // Reset quiz
+  // Reset quiz (keeping existing functionality but enhanced)
   function resetQuiz() {
     if (!confirm("Are you sure you want to reset all your answers?")) {
       return;
@@ -208,20 +529,34 @@ jQuery(document).ready(function ($) {
 
     // Clear any auto-saved data
     clearAutoSave();
+
+    // Update progress and navigation
+    updateProgress();
+    updateNavigationStates();
   }
 
-  // Auto-save functionality
+  // Auto-save functionality (keeping existing)
   function autoSave() {
-    var data = collectAnswers();
-    if (Object.keys(data.answers).length > 0) {
-      localStorage.setItem(
-        "pdf_mcq_quiz_" + data.quiz_id,
-        JSON.stringify(data.answers)
-      );
+    var quizContainer = $(".pdf-mcq-container");
+    var quizId = quizContainer.data("quiz-id");
+
+    if (!quizId) return;
+
+    const answers = {};
+    $(".mcq-question").each(function () {
+      const questionNum = $(this).data("question");
+      const selectedAnswer = $(this).find('input[type="radio"]:checked').val();
+      if (selectedAnswer) {
+        answers[questionNum] = selectedAnswer;
+      }
+    });
+
+    if (Object.keys(answers).length > 0) {
+      localStorage.setItem("pdf_mcq_quiz_" + quizId, JSON.stringify(answers));
     }
   }
 
-  // Load auto-saved data
+  // Load auto-saved data (keeping existing)
   function loadAutoSave() {
     var quizContainer = $(".pdf-mcq-container");
     var quizId = quizContainer.data("quiz-id");
@@ -254,7 +589,7 @@ jQuery(document).ready(function ($) {
     }
   }
 
-  // Clear auto-saved data
+  // Clear auto-saved data (keeping existing)
   function clearAutoSave() {
     var quizContainer = $(".pdf-mcq-container");
     var quizId = quizContainer.data("quiz-id");
@@ -264,7 +599,7 @@ jQuery(document).ready(function ($) {
     }
   }
 
-  // Show notification
+  // Show notification (enhanced)
   function showNotification(message, type) {
     type = type || "info";
 
@@ -311,7 +646,7 @@ jQuery(document).ready(function ($) {
     }, 5000);
   }
 
-  // Progress tracking
+  // Progress tracking (enhanced)
   function updateProgress() {
     var totalQuestions = $(".mcq-question").length;
     var answeredQuestions = $(".mcq-question.answered").length;
@@ -367,11 +702,11 @@ jQuery(document).ready(function ($) {
       );
   }
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (keeping existing)
   function initKeyboardShortcuts() {
     $(document).on("keydown", function (e) {
-      // Only activate shortcuts when focused on quiz area
-      if (!$(e.target).closest(".pdf-mcq-container").length) {
+      // Only activate shortcuts when quiz is active
+      if (!$(".pdf-mcq-content").is(":visible")) {
         return;
       }
 
@@ -386,10 +721,41 @@ jQuery(document).ready(function ($) {
         e.preventDefault();
         $("#reset-quiz").click();
       }
+
+      // PDF navigation shortcuts (only if PDF canvas exists)
+      if (document.getElementById("pdf-canvas")) {
+        // Arrow keys for PDF navigation
+        if (e.keyCode === 37 || e.keyCode === 38) {
+          // Left or Up arrow
+          e.preventDefault();
+          onPrevPage();
+        } else if (e.keyCode === 39 || e.keyCode === 40) {
+          // Right or Down arrow
+          e.preventDefault();
+          onNextPage();
+        }
+
+        // Zoom shortcuts
+        if (e.ctrlKey || e.metaKey) {
+          if (e.keyCode === 187 || e.keyCode === 107) {
+            // + key
+            e.preventDefault();
+            zoomIn();
+          } else if (e.keyCode === 189 || e.keyCode === 109) {
+            // - key
+            e.preventDefault();
+            zoomOut();
+          } else if (e.keyCode === 48) {
+            // 0 key
+            e.preventDefault();
+            fitWidth();
+          }
+        }
+      }
     });
   }
 
-  // Question navigation
+  // Question navigation (keeping existing)
   function initQuestionNavigation() {
     // Add question number links for easy navigation
     var navigationHtml = '<div class="question-navigation">';
@@ -443,15 +809,15 @@ jQuery(document).ready(function ($) {
           "overflow: hidden;" +
           "text-overflow: ellipsis;" +
           "color: #000;" +
-          "display: flex;" +                // Center content horizontally and vertically
+          "display: flex;" +
           "align-items: center;" +
           "justify-content: center;" +
           "text-align: center;" +
           "}" +
           ".nav-btn:hover {" +
-          "background-color: #e6f3fa;" +    // Light blue background on hover
+          "background-color: #e6f3fa;" +
           "border-color: #0073aa;" +
-          "color: #0073aa;" +               // Make text blue on hover for visibility
+          "color: #0073aa;" +
           "}" +
           ".nav-btn.answered {" +
           "background-color: #46b450;" +
@@ -493,7 +859,7 @@ jQuery(document).ready(function ($) {
     });
   }
 
-  // Update navigation states
+  // Update navigation states (keeping existing)
   function updateNavigationStates() {
     $(".mcq-question").each(function () {
       var questionNum = $(this).data("question");
@@ -514,50 +880,32 @@ jQuery(document).ready(function ($) {
     });
   }
 
-  // Timer functionality
-  function startExamTimer() {
-    var timerContainer = $('.exam-timer');
-    if (!timerContainer.length) return;
+  // Prevent accidental page refresh during quiz
+  function preventAccidentalRefresh() {
+    let quizStarted = false;
 
-    var totalMinutes = parseInt(timerContainer.data('time'), 10) || 30;
-    var totalSeconds = totalMinutes * 60;
-    var display = $('#timer-display');
-    var interval = setInterval(function () {
-        var minutes = Math.floor(totalSeconds / 60);
-        var seconds = totalSeconds % 60;
-        display.text(
-            (minutes < 10 ? '0' : '') + minutes + ':' +
-            (seconds < 10 ? '0' : '') + seconds
-        );
-        if (totalSeconds <= 0) {
-            clearInterval(interval);
-            display.text('00:00');
-            // Auto-submit the quiz
-            if ($('#submit-quiz').length && !$('#submit-quiz').prop('disabled')) {
-                alert('Time is up! Your quiz will be submitted automatically.');
-                $('#submit-quiz').trigger('click');
-            }
-        }
-        totalSeconds--;
-    }, 1000);
-}
+    $("#start-quiz").on("click", function () {
+      quizStarted = true;
+    });
 
-  // Initialize everything when page loads
+    $(window).on("beforeunload", function (e) {
+      if (quizStarted && $("#quiz-results").is(":hidden")) {
+        e.preventDefault();
+        e.returnValue =
+          "Are you sure you want to leave? Your quiz progress will be lost.";
+        return "Are you sure you want to leave? Your quiz progress will be lost.";
+      }
+    });
+  }
+
+  // Initialize everything when page loads (ENHANCED)
   function initialize() {
     initQuiz();
     initKeyboardShortcuts();
     initQuestionNavigation();
-    loadAutoSave();
+    initPDFControls(); // Initialize PDF controls
+    preventAccidentalRefresh();
     updateProgress();
-    startExamTimer(); // Start the exam timer
-
-    // Update progress and navigation when answers change
-    $('.mcq-question input[type="radio"]').on("change", function () {
-      setTimeout(function () {
-        updateProgress();
-        updateNavigationStates();
-      }, 100);
-    });
 
     // Add highlight style
     if (!$("#quiz-highlight-styles").length) {
